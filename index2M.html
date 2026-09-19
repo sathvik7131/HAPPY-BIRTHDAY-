@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dhruthii — A Little Book</title>
+<style>
+:root{
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --dur:1120ms;
+  --paper:#081a2d;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#06182b}
+body{font-family:Georgia,"Times New Roman",serif;color:#dff5ff;touch-action:none}
+.stage{
+  position:relative;width:100%;height:100%;display:grid;place-items:center;
+  background:
+    radial-gradient(circle at 50% 45%,rgba(30,87,139,.34),transparent 44%),
+    #06182b;
+  overflow:hidden;
+}
+.viewer{
+  position:relative;width:min(96vw,1780px);aspect-ratio:2.06/1;
+  max-height:96vh;perspective:3200px;transform:translateZ(0);
+  isolation:isolate;filter:drop-shadow(0 28px 42px rgba(0,0,0,.38));
+}
+.book{
+  position:absolute;inset:0;transform-style:preserve-3d;
+  transform:translateZ(0);
+}
+.page,.under{
+  position:absolute;inset:0;border-radius:7px;overflow:hidden;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  transform-style:preserve-3d;will-change:transform,filter;
+  contain:layout paint style;transform:translateZ(0);
+}
+.page img,.under img{
+  display:block;width:100%;height:100%;object-fit:cover;
+  user-select:none;-webkit-user-drag:none;pointer-events:none;
+}
+.under{z-index:1}
+.page{z-index:4;box-shadow:0 0 0 1px rgba(190,235,247,.14),0 20px 45px rgba(0,0,0,.28)}
+.turn{
+  z-index:8;
+  transform-origin:left center;
+  animation:pageForward var(--dur) var(--ease) both;
+}
+.turn.back{
+  transform-origin:right center;
+  animation-name:pageBackward;
+}
+@keyframes pageForward{
+  0%{transform:translate3d(0,0,0) rotateY(0deg);filter:brightness(1)}
+  18%{filter:brightness(.985)}
+  50%{filter:brightness(.86)}
+  78%{filter:brightness(.94)}
+  100%{transform:translate3d(0,0,0) rotateY(-180deg);filter:brightness(.98)}
+}
+@keyframes pageBackward{
+  0%{transform:translate3d(0,0,0) rotateY(0deg);filter:brightness(1)}
+  18%{filter:brightness(.985)}
+  50%{filter:brightness(.86)}
+  78%{filter:brightness(.94)}
+  100%{transform:translate3d(0,0,0) rotateY(180deg);filter:brightness(.98)}
+}
+/* Fold illumination follows the turning page, creating a soft PowerPoint-like curl. */
+.turn::before{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:3;
+  background:
+    linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.02) 34%,
+    rgba(255,255,255,.18) 49%,rgba(0,0,0,.24) 54%,rgba(0,0,0,0) 72%);
+  opacity:.75;mix-blend-mode:soft-light;
+}
+.turn::after{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:4;
+  background:linear-gradient(90deg,rgba(0,0,0,.18),transparent 30%,transparent 68%,rgba(0,0,0,.20));
+  opacity:.65;
+}
+.edge{position:absolute;z-index:30;top:3%;bottom:3%;width:15%;cursor:pointer}
+.edge.left{left:0}.edge.right{right:0}
+.hint{
+ position:fixed;left:50%;bottom:10px;transform:translateX(-50%);
+ z-index:50;font:10px/1.2 "Courier New",monospace;letter-spacing:2px;
+ color:rgba(205,232,241,.45);pointer-events:none
+}
+.loading{
+ position:fixed;inset:0;z-index:100;display:grid;place-items:center;
+ background:#06182b;color:#bfe8f5;font:12px "Courier New",monospace;
+ letter-spacing:3px;transition:opacity .45s ease
+}
+.loading.done{opacity:0;pointer-events:none}
+@media(max-width:800px){
+ .viewer{width:min(calc(100vw - 12px),calc((100dvh - 16px)*2.06));max-width:100%;max-height:calc(100dvh - 16px)}
+ .edge{width:23%}.hint{display:none}
+ .page img,.under img{object-fit:contain}
+}
+@media(prefers-reduced-motion:reduce){
+ :root{--dur:180ms}
+}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="viewer" id="viewer">
+    <div class="book" id="book">
+      <div class="under" id="under"><img id="underImg" alt=""></div>
+      <div class="page" id="page"><img id="pageImg" alt=""></div>
+    </div>
+    <div class="edge left" id="prev" aria-label="Previous page"></div>
+    <div class="edge right" id="next" aria-label="Next page"></div>
+  </div>
+</div>
+<div class="hint" id="hint">CLICK THE EDGES · SWIPE · USE ← →</div>
+<div class="loading" id="loading">OPENING THE BOOK…</div>
+
+<script>
+(() => {
+  "use strict";
+  const files = ['slide-1.png','slide-2.png','slide-3.png','slide-4.png','slide-5.png','slide-6.png'];
+  const page = document.getElementById("page");
+  const pageImg = document.getElementById("pageImg");
+  const under = document.getElementById("under");
+  const underImg = document.getElementById("underImg");
+  const viewer = document.getElementById("viewer");
+  const loading = document.getElementById("loading");
+  const hint = document.getElementById("hint");
+
+  let index = 0, busy = false, startX = 0, startY = 0;
+
+  // Decode images before enabling navigation. This removes the "click -> wait -> open" hitch.
+  const decoded = [];
+  const ready = files.map((src, i) => new Promise(resolve => {
+    const im = new Image();
+    im.decoding = "async";
+    im.onload = async () => {
+      try { if (im.decode) await im.decode(); } catch(e) {}
+      decoded[i] = im;
+      resolve();
+    };
+    im.onerror = resolve;
+    im.src = src;
+  }));
+
+  function setStatic(i) {
+    pageImg.src = files[i];
+    underImg.src = files[Math.min(i + 1, files.length - 1)];
+  }
+
+  function turn(dir) {
+    if (busy) return;
+    const target = index + dir;
+    if (target < 0 || target >= files.length) return;
+
+    busy = true;
+
+    // Destination is already sitting underneath the current page.
+    underImg.src = files[target];
+
+    const turning = page.cloneNode(true);
+    turning.classList.add("turn");
+    if (dir < 0) turning.classList.add("back");
+    turning.style.animationDuration = getComputedStyle(document.documentElement).getPropertyValue("--dur");
+    viewer.querySelector(".book").appendChild(turning);
+
+    const finish = () => {
+      turning.removeEventListener("animationend", finish);
+      turning.remove();
+      index = target;
+      setStatic(index);
+      busy = false;
+      hint.style.opacity = "0";
+    };
+    turning.addEventListener("animationend", finish, {once:true});
+  }
+
+  document.getElementById("next").addEventListener("click", () => turn(1));
+  document.getElementById("prev").addEventListener("click", () => turn(-1));
+
+  window.addEventListener("keydown", e => {
+    if (["ArrowRight","PageDown"].includes(e.key)) { e.preventDefault(); turn(1); }
+    else if (["ArrowLeft","PageUp"].includes(e.key)) { e.preventDefault(); turn(-1); }
+  });
+
+  viewer.addEventListener("pointerdown", e => {
+    startX=e.clientX; startY=e.clientY;
+  });
+  viewer.addEventListener("pointerup", e => {
+    const dx=e.clientX-startX, dy=e.clientY-startY;
+    if (Math.abs(dx)>55 && Math.abs(dx)>Math.abs(dy)*1.2) turn(dx<0?1:-1);
+  });
+
+  Promise.all(ready).then(() => {
+    setStatic(0);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      loading.classList.add("done");
+    }));
+  });
+})();
+</script>
+</body>
+</html>
